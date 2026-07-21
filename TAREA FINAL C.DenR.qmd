@@ -1,0 +1,396 @@
+---
+title: "TAREA FINAL - Turismo de Uruguay a Argentina"
+author: "Ignacio Molina"
+format: html
+editor: visual
+---
+
+## TURISMO DE URUGUAY A ARGENTINA
+
+## 0-) Cargar las librerias y datos
+
+```{r}
+library(ggplot2)
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+library(rpart)
+library(rpart.plot)
+library(tidymodels)
+library(parsnip)
+library(shiny)
+library(rsconnect)
+```
+
+```{r}
+dato <- read_xlsx("emisivo.xlsx")
+
+dato <- dato[-c(27, 40, 41)] 
+dato <- dato |>
+  mutate(
+    GastosMedia = GastoTotal / Gente,
+    anio = year(FechaSalida)
+  )
+
+datos <- dato |> filter(anio != 2016, Pais == 'Uruguay')
+
+datos_uru <- datos %>%
+  mutate(
+    des = ifelse(Destino == "Argentina",
+                    "Argentina",
+                    "Resto del mundo")
+  )
+```
+
+```{r}
+argentina <- datos %>%
+  filter(Destino == "Argentina")
+
+arg_2024 <- argentina %>%
+  filter(anio == 2024)
+
+
+arg_2024$Mes <- factor(arg_2024$Mes, levels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "set", "Oct", "Nov", "Dic"))
+
+arg_2023 <- argentina %>%
+  filter(anio == 2023)
+
+arg_2023$Mes <- factor(arg_2023$Mes, levels = c("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "set", "Oct", "Nov", "Dic"))
+```
+
+## 1-) INTRODUCCIÓN:
+
+El fenómeno de interés son los uruguayos que viajan a Argentina, desde 2017 hasta 2025. Es importante explorar los viajes que se hacen debido a que, como veremos más adelante, Argentina es el país que más visitan los uruguayos.
+
+Creo que es bueno intentar entender el motivo del que suceda esto, por qué la diferencia es tan grande a comparación de otros países y si se puede aprender algo de estos datos para intentar hacer algo para aprovechar el turismo.
+
+## 2-) DATOS:
+
+Los datos utilizados en el presente trabajo son respecto al **turismo emisivo de Uruguay,** obtenido a través de la encuesta de turismo receptivo. Esta informacion de [**"El Catalogo Nacional de Datos Abiertos de Uruguay"**](https://%20catalogodatos.gub.uy "El Catalogo Nacional de Datos Abiertos de Uruguay"). El conjunto de datos contiene la información desagregada de los residentes de Uruguay que viajan fuera del país, tanto la gente que viaja hacia Argentina como otras partes del mundo) y el gasto de los mismos según destino principal del viaje.
+
+Datos obtenidos en cada trimestre desde el año 2016 hasta 2025 (para el trabajo voy usar solo los datos entre 2017 - 2025, debido a que de 2016 se tienen muy pocos datos). Principalmente se hablara del año 2024 ya que es el de los años mas recientes y tenemos infiormacion de enero hasta diciembre.
+
+La información detalla los siguientes puntos:
+
+- transporte internacional de salida
+
+- fecha de salida y fecha de entrada
+
+- nacionalidad
+
+- destino
+
+- departamento de residencia
+
+- motivo de viaje
+
+- ocupación del viajante y nivel de estudios
+
+- destino
+
+- tipo de alojamiento
+
+- lugar de salida
+
+- cantidad de personas que viajan
+
+- transporte internacional de ingreso y local
+
+- estadía
+
+- gasto total: en alojamiento, en transporte, en alimentación, en transporte local, en cultura, en tours, en compras etc.
+
+Tambien se crearon variables adicionales como anio y GastosMedia.
+
+## 3-) ANALISIS EXPLORATORIO:
+
+Al ver el grafico podemos llegar a la conclusion que la mayoria de las personas escogen ir a Argentina por sobre cualquier otro lugar. Incluso mas que a algunos paises de Europa, la cual es conocida por tener una gran cantidad de zonas turisticas.
+
+```{r}
+datos |> filter(anio == 2024) |>
+  ggplot(aes(x = Destino, fill = Destino)) +
+  geom_bar() +
+  labs(
+    title = "Lugares mas visitados en 2024",
+    x = "Pais de destino",
+    y = "Cantidad de personas"
+  )  +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Si vemos el dataframe pais_datos podemos ver que el 64.93% de los uruguayos prefieren ir a Argentina por sobre cualquier otro lugar del mundo.
+
+```{r}
+pais_datos <- datos_uru %>%
+  group_by(des) %>%
+  summarise(
+    cantidad = n(),
+    gasto_promedio = mean(GastoTotal, na.rm = TRUE),
+    gasto_prom_persona = mean(GastosMedia, na.rm = TRUE),
+    gasto_mediano = median(GastoTotal, na.rm = TRUE),
+    gasto_sd = sd(GastoTotal, na.rm = TRUE)
+  ) %>%
+  mutate(
+    porcentaje = round(100 * cantidad / sum(cantidad), 2)
+  )
+
+pais_datos
+```
+
+Al ver los detalles de los gastos nos podemos dar cuenta de que uno de los posibles motivos del porque de esto es por el gasto, ya que es mucho mayor que en la mayoria de otros paises. Esto lo podemos ver tambien por cada pais por separado.
+
+```{r}
+paises <- datos %>%
+  group_by(Destino) %>%
+  summarise(
+    cantidad = n(),
+    gasto_promedio = mean(GastoTotal, na.rm = TRUE),
+    gasto_prom_persona = mean(GastosMedia, na.rm = TRUE),
+    gasto_mediano = median(GastoTotal, na.rm = TRUE),
+    gasto_sd = sd(GastoTotal, na.rm = TRUE))
+
+paises
+```
+
+Otro de los principales motivos del porque la gente viaja tanto a Argentina es por la diversidad de formas que hay para llegar a este, al ser un pais muy cercano a Uruguay y al cual se puede llegar de uno a otro tanto por forma terrestre como maritima, genera versatilidad a la hora de viajar entre estos.
+
+Sobre todo algo que ayuda mucho a las personas a viajar es que al poder ir en auto o en omnibus se minimizan los gastos.
+
+Esto se puede ver en los grafico en el grafico de "Cantidad de turistas por transporte internacional".
+
+```{r}
+ggplot(argentina, aes(x = `Transporte Internacional de Salida`)) +
+  geom_bar() +
+  labs(
+    title = "Cantidad de turistas por transporte internacional",
+    x = "Transporte",
+    y = "Cantidad de viajes"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Dejando de lado los gastos y la forma en la que se viaja a argentina, vamos a hablar de las personas que han viajado a Argentina exclusivamente para vacacionar. Como se puede esperar en 2020 y 2021 no hubo muchas viajes hacia Argentina debido a la pandemia, siendo aproximadamente de 400 personas en todo el año las que fueron para este pais.
+
+Sin embargo lo que mas me sorprendio es que en 2023 y 2024 no fue tanta gente de turismo para Argentina, ya que debido a que a la inflacion de su moneda muchos Uruguayos aprovecharon para comprar cosas en Argentina, por lo que muchos pensariamos que iria mucha mas gente pero no es asi. Hubo mucha gente si, pero no tanta como en 2017.
+
+```{r}
+arg_filtrado <- datos |> filter(Motivo == 'Ocio, Recreo, Vacaciones') %>%
+  count(anio)
+
+a
+
+ggplot(arg_filtrado, aes(x = factor(anio), y = n, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    title = "Cantidad de turistas que viajaron a Argentina por año",
+    x = "Año",
+    y = "Cantidad de personas"
+  ) +
+  theme_minimal()
+```
+
+Y tambien se puede ver que no aumento el gasto, por lo que la gente probablemente aprovecho para gastar en pocas cosas de poco valor o cosas que ya habrian comprado de todos modos.
+
+```{r}
+gastoMed <- argentina %>% 
+  filter(anio != 2016) %>%
+  group_by(anio) %>%
+  summarise(Total = sum(GastosMedia, na.rm = TRUE))
+
+ggplot(gastoMed, aes(x = factor(anio), y = Total, fill = factor(anio))) +
+  geom_col(color = "white") +
+  theme_minimal() +
+  labs(
+    title = "Gasto Medio por Año",
+    x = "Año",
+    y = "Gasto medio acumulado total"
+  ) +
+  theme(legend.position = "none")
+```
+
+Tambien parece que la gente por lo menos en 2024 no ha viajado mucho en verano, esto es normal debido a que la gente no suele ir a Argentina por el verano, en este caso los uruguayos van mucho mas en Marzo o en Junio.
+
+```{r}
+ggplot(arg_2024, aes(x=Mes, fill = Mes)) +
+  geom_bar() +
+  labs(
+    title = "Cantidad de personas que viajan por mes 2024",
+    x = "Mes",
+    y = "Cantidad"
+  ) +
+  theme_bw()
+```
+
+Cree un arbol de decisiones para decisiones para saber cuanto influyen los dias de estadia de las personas en el gasto medio (en dolares estadounidenses) de las personas. De este se pueden sacar las siguientes conclusiones:
+
+```{r}
+set.seed(1234)
+arbol_arg <- initial_split(arg_2024, prop = 0.8)
+arbol_arg
+```
+
+```{r}
+arbol_train = training(arbol_arg)
+
+arbol_test = testing(arbol_arg)
+```
+
+```{r}
+modelo_arbol <- decision_tree() %>%
+  set_engine("rpart") %>%
+  set_mode("regression")
+
+ajuste <- modelo_arbol %>%
+  fit(GastosMedia ~ Estadia, data = arbol_train)
+
+arbol_final <- extract_fit_engine(ajuste)
+
+rpart.plot(arbol_final)
+```
+
+- Los turistas que se quedan **menos de 2.5 días** gastan alrededor de **183**.
+
+- Los que se quedan **entre 2.5 y 5.5 días** gastan alrededor de **347**.
+
+<!-- -->
+
+- Los que se quedan **entre 5.5 y 7.5 días** gastan alrededor de **493**.
+
+<!-- -->
+
+- Los que se quedan **entre 7.5 y 28 días** gastan alrededor de **644**.
+
+<!-- -->
+
+- Los que se quedan **más de 28 días** gastan muchísimo más (**1987**).
+
+```{r}
+predicciones <- predict(ajuste, arbol_test)
+
+resultados <- bind_cols(
+  arbol_test,
+  predicciones
+)
+
+metrics(
+  resultados,
+  truth = GastosMedia,
+  estimate = .pred
+)
+```
+
+El árbol de decisión obtuvo un RMSE de 298.35 y un MAE de 175.17 en el conjunto de prueba. El coeficiente de determinación fue R2 = 0.374, lo que indica que el modelo explica aproximadamente el 37.4% de la variabilidad del gasto medio. Esto significa que a pesar de que la estadia es bastante importante a pesar de no ser el unico tipo de gasto.
+
+Para que se puede visualizar de forma interactiva cree 2 tipos de graficos en Shiny para poder explorar los datos.
+
+- GRAFICO DE GASTOS POR AÑO:
+
+```{r}
+ui <- fluidPage(
+  
+  titlePanel("Turismo Uruguay - Argentina"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "anio",
+        "Seleccione un año:",
+        choices = sort(unique(datos$anio))
+      )
+    ),
+    
+    mainPanel(
+      plotOutput("grafico_barras")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  datos_filtrados <- reactive({
+    argentina %>%
+      filter(anio == input$anio)
+  })
+  
+  output$grafico_barras <- renderPlot({
+    
+    ggplot(datos_filtrados(),
+           aes(x = `Transporte Internacional de Salida`, fill = `Transporte Internacional de Salida`)) +
+      geom_bar() +
+      labs(
+        title = paste("Transporte utilizado en", input$anio),
+        x = "Transporte",
+        y = "Cantidad de turistas"
+      ) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1)
+      )
+  })
+}
+
+shinyApp(ui, server)
+```
+
+- GRAFICO POR DEPARTAMENTO
+
+```{r}
+ui <- fluidPage(
+  
+  titlePanel("Gasto Total por Mes"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput(
+        "departamento",
+        "Seleccione un departamento:",
+        choices = sort(unique(datos$Departamento))
+      )
+    ),
+    
+    mainPanel(
+      plotOutput("grafico")
+    )
+  )
+)
+
+server <- function(input, output) {
+  
+  datos_filtrados <- reactive({
+    datos %>%
+      filter(Departamento == input$departamento)
+  })
+  
+  output$grafico <- renderPlot({
+    
+    gasto_mes <- datos_filtrados() %>%
+      group_by(Mes) %>%
+      summarise(
+        gasto_total = sum(GastoTotal, na.rm = TRUE)
+      )
+    
+    ggplot(gasto_mes,
+           aes(x = Mes, y = gasto_total, group = 1)) +
+      geom_line(linewidth = 1) +
+      geom_point(size = 3) +
+      labs(
+        title = paste("Gasto Total por Mes -", input$departamento),
+        x = "Mes",
+        y = "Gasto Total"
+      ) +
+      theme_minimal()
+  })
+}
+
+shinyApp(ui, server)
+```
+
+## 4-) CONCLUSIÓN:
+
+Argentina es el pais mas visitado por lo uruguayos debido a su cercania, su diversidad de formas de llegar a este y el hecho de que hablamos el mismo idioma hace que sea facil poder inturectuar con gente una vez estamos ahi.
+
+El descubrimiento mas curioso sin duda es el hecho de que no aumento tanto el turismo en 2023 y 2024. El resto de conclusiones son esperables.
